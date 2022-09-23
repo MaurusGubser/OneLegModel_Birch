@@ -1,0 +1,13 @@
+{
+  "model": {
+    "class": "OneLegModel"
+  },
+  "filter": {
+    "nparticles": 200
+  },
+  "sampler": {
+    "nsamples": 5
+  },
+  "input": "input/noised_observations_largetimestep.json",
+  "output": "output/sampled_states_oneleg_largetimestep_61_200particles.json"
+}

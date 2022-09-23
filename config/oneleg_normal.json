@@ -1,0 +1,13 @@
+{
+  "model": {
+    "class": "OneLegModel"
+  },
+  "filter": {
+    "nparticles": 200
+  },
+  "sampler": {
+    "nsamples": 5
+  },
+  "input": "input/noised_observations_normal.json",
+  "output": "output/sampled_states_normal_learnobservationvar_14_200particles.json"
+}

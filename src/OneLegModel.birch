@@ -1,0 +1,257 @@
+class OneLegModel < Model {
+  
+  //State vector
+  // 1: x_H (x_0)
+  // 2: y_H (x_1)
+  // 3: phi_0 (theta_0)
+  // 4: phi_1 (theta_1)
+  // 7: x_dot_H
+  // 8: y_dot_H
+  // 9: phi_dot_0
+  // 10: phi_dot_1
+  // 13: x_ddot_H
+  // 14: y_ddot_H
+  // 15: phi_ddot_0
+  // 16: phi_ddot_1
+  x:Tape<Random<Real[_]>>;
+  
+  //Observations variables
+  //imu0 (left femur)
+  x_ddot_0: Tape<Random<Real>>;
+  y_ddot_0: Tape<Random<Real>>;
+  z_ddot_0: Tape<Random<Real>>;
+  omega_x_0: Tape<Random<Real>>;
+  omega_y_0: Tape<Random<Real>>;
+  omega_z_0: Tape<Random<Real>>;
+  //imu1 (left fibula)
+  x_ddot_1: Tape<Random<Real>>;
+  y_ddot_1: Tape<Random<Real>>;
+  z_ddot_1: Tape<Random<Real>>;
+  omega_x_1: Tape<Random<Real>>;
+  omega_y_1: Tape<Random<Real>>;
+  omega_z_1: Tape<Random<Real>>;
+  //ps4 (left heel)
+  x_dot_4: Tape<Random<Real>>;
+  y_dot_4: Tape<Random<Real>>;
+  z_dot_4: Tape<Random<Real>>;
+  x_ddot_4: Tape<Random<Real>>;
+  y_ddot_4: Tape<Random<Real>>;
+  z_ddot_4: Tape<Random<Real>>;
+  //hip
+  x_True: Tape<Random<Real[_]>>;
+  
+  //Fixed parameters
+  //time step
+  dt: Real;
+  //initialisation parameters
+  a_1: Real[_];
+  P_1: Real[_,_];
+  //process transition matrix
+  T: Real[_,_];
+  //hyperparams process covariance
+  Psi: Real[_,_];
+  nu: Real;
+  //process covariance matrix
+  Q: Random<Real[_,_]>;
+  //hyperparams observation variances
+  alpha_imu_acc: Real;
+  beta_imu_acc: Real;
+  alpha_imu_gyro: Real;
+  beta_imu_gyro: Real;
+  alpha_press_velo: Real;
+  beta_press_velo: Real;
+  alpha_press_acc: Real;
+  beta_press_acc: Real;
+  //observation noise
+  sigma_imu_acc: Random<Real>;
+  sigma_imu_gyro: Random<Real>;
+  sigma_press_velo: Random<Real>;
+  sigma_press_acc: Random<Real>;
+
+  h: Real;
+
+  //mechanical model constants
+  g: Real <- 9.81; //gravitation constant
+  l_0: Real <- 0.5; //hip - left knee
+  l_1: Real <- 0.6; //left knee - left heel
+  c_0: Real <- 0.34; //hip - c.o.m. left femur
+  c_1: Real <- 0.29; //left knee - c.o.m. left fibula
+  s_0: Real <- 0.0; //c.o.m. left femur - IMU1
+  s_1: Real <- 0.0; //c.o.m. left fibula - IMU2
+  cst_0: Real <- c_0 + s_0;
+  cst_1: Real <- c_1 + s_1;
+
+  function state_to_observation(x:Random<Real[_]>) -> Array<Expression<Real>> {
+    y:Array<Expression<Real>>;
+    
+    z:Random<Real>;
+    z <- 0.0;
+    
+    //imu0
+    y.insert(1, box(cst_0*element(x, 11) + g*sin(element(x, 3)) + sin(element(x, 3))*element(x, 10) + cos(element(x, 3))*element(x, 9)));
+    y.insert(2, box(cst_0*pow(element(x, 7), 2.0) + g*cos(element(x, 3)) - sin(element(x, 3))*element(x, 9) + cos(element(x, 3))*element(x, 10)));
+    y.insert(3, z);
+    y.insert(4, z);
+    y.insert(5, z);
+    y.insert(6, box(element(x, 7)));
+    
+    //imu1
+    y.insert(7, box(cst_1*element(x, 11) + cst_1*element(x, 12) + g*sin(element(x, 3) + element(x, 4)) + l_0*sin(element(x, 4))*pow(element(x, 7), 2.0) + l_0*cos(element(x, 4))*element(x, 11) + sin(element(x, 3) + element(x, 4))*element(x, 10) + cos(element(x, 3) + element(x, 4))*element(x, 9)));
+    y.insert(8, box(cst_1*pow(element(x, 7), 2.0) + 2*cst_1*element(x, 7)*element(x, 8) + cst_1*pow(element(x, 8), 2.0) + g*cos(element(x, 3) + element(x, 4)) - l_0*sin(element(x, 4))*element(x, 11) + l_0*cos(element(x, 4))*pow(element(x, 7), 2.0) - sin(element(x, 3) + element(x, 4))*element(x, 9) + cos(element(x, 3) + element(x, 4))*element(x, 10)));
+    y.insert(9, z);
+    y.insert(10, z);
+    y.insert(11, z);
+    y.insert(12, box(element(x, 7) + element(x, 8)));
+    
+    //ps4
+    y.insert(13, box(l_0*cos(element(x, 3))*element(x, 7) + l_1*(element(x, 7) + element(x, 8))*cos(element(x, 3) + element(x, 4)) + element(x, 5)));
+    y.insert(14, box(l_0*sin(element(x, 3))*element(x, 7) + l_1*(element(x, 7) + element(x, 8))*sin(element(x, 3) + element(x, 4)) + element(x, 6)));
+    y.insert(15, z);
+    y.insert(15, box(-l_0*sin(element(x, 3))*pow(element(x, 7), 2.0) + l_0*cos(element(x, 3))*element(x, 11) - l_1*pow(element(x, 7) + element(x, 8), 2.0)*sin(element(x, 3) + element(x, 4)) + l_1*(element(x, 11) + element(x, 12))*cos(element(x, 3) + element(x, 4)) + element(x, 9)));
+    y.insert(16, box(l_0*sin(element(x, 3))*element(x, 11) + l_0*cos(element(x, 3))*pow(element(x, 7), 2.0) + l_1*pow(element(x, 7) + element(x, 8), 2.0)*cos(element(x, 3) + element(x, 4)) + l_1*(element(x, 11) + element(x, 12))*sin(element(x, 3) + element(x, 4)) + element(x, 10)));
+    y.insert(18, z);
+
+    return y;
+  }
+
+  
+  override function simulate() {
+    Q ~ InverseWishart(Psi, nu);
+    
+    sigma_imu_acc ~ InverseGamma(alpha_imu_acc, beta_imu_acc);
+    sigma_imu_gyro ~ InverseGamma(alpha_imu_gyro, beta_imu_gyro);
+    sigma_press_velo ~ InverseGamma(alpha_press_velo, beta_press_velo);
+    sigma_press_acc ~ InverseGamma(alpha_press_acc, beta_press_acc);
+  }
+  
+
+  override function simulate(t:Integer) {  
+    T <- [[1.0, 0.0, 0.0, 0.0, dt, 0.0, 0.0, 0.0, pow(dt, 2.0)/2.0, 0.0, 0.0, 0.0],
+          [0.0, 1.0, 0.0, 0.0, 0.0, dt, 0.0, 0.0, 0.0, pow(dt, 2.0)/2.0, 0.0, 0.0],
+          [0.0, 0.0, 1.0, 0.0, 0.0, 0.0, dt, 0.0, 0.0, 0.0, pow(dt, 2.0)/2.0, 0.0],
+          [0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, dt, 0.0, 0.0, 0.0, pow(dt, 2.0)/2.0],
+          [0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, dt, 0.0, 0.0, 0.0],
+          [0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, dt, 0.0, 0.0],
+          [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, dt, 0.0],
+          [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, dt],
+          [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0],
+          [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0],
+          [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0],
+          [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0]];
+
+        
+    if t==1 {
+      x[t] ~ MultivariateGaussian(a_1, P_1);
+    }
+    else {
+      x[t] ~ MultivariateGaussian(T*x[t-1], Q);
+    }
+    
+    // observation
+    let w <- state_to_observation(x[t]);
+    /*
+    x_ddot_0[t] ~ Gaussian(w.get(1), 100.0*sigma_imu_acc);
+    y_ddot_0[t] ~ Gaussian(w.get(2), 100.0*sigma_imu_acc);
+    z_ddot_0[t] ~ Gaussian(w.get(3), 100.0*sigma_imu_acc);
+    omega_x_0[t] ~ Gaussian(w.get(4), 100.0*sigma_imu_gyro);
+    omega_y_0[t] ~ Gaussian(w.get(5), 100.0*sigma_imu_gyro);
+    omega_z_0[t] ~ Gaussian(w.get(6), 100.0*sigma_imu_gyro);
+    x_ddot_1[t] ~ Gaussian(w.get(7), 100.0*sigma_imu_acc);
+    y_ddot_1[t] ~ Gaussian(w.get(8), 100.0*sigma_imu_acc);
+    z_ddot_1[t] ~ Gaussian(w.get(9), 100.0*sigma_imu_acc);
+    omega_x_1[t] ~ Gaussian(w.get(10), 100.0*sigma_imu_gyro);
+    omega_y_1[t] ~ Gaussian(w.get(11), 100.0*sigma_imu_gyro);
+    omega_z_1[t] ~ Gaussian(w.get(12), 100.0*sigma_imu_gyro);
+
+    //left pressure
+    x_dot_4[t] ~ Gaussian(w.get(13), 100.0*sigma_press_velo);
+    y_dot_4[t] ~ Gaussian(w.get(14), 100.0*sigma_press_velo);
+    z_dot_4[t] ~ Gaussian(w.get(15), 100.0*sigma_press_velo);
+    x_ddot_4[t] ~ Gaussian(w.get(16), 100.0*sigma_press_acc);
+    y_ddot_4[t] ~ Gaussian(w.get(17), 100.0*sigma_press_acc);
+    z_ddot_4[t] ~ Gaussian(w.get(18), 100.0*sigma_press_acc);
+    */
+    x_True[t] ~ MultivariateGaussian(x[t], h*identity(12));
+  }
+
+  override function read(buffer:Buffer) {
+    dt <-? buffer.get<Real>("dt");
+    a_1 <-? buffer.get<Real[_]>("a_1");
+    P_1 <-? buffer.get<Real[_,_]>("P_1");
+    
+    Psi <-? buffer.get<Real[_,_]>("Psi");
+    nu <-? buffer.get<Real>("nu");
+    
+    h <-? buffer.get<Real>("h");
+    
+    alpha_imu_acc <-? buffer.get<Real>("alpha_imu_acc");
+    beta_imu_acc <-? buffer.get<Real>("beta_imu_acc");
+    alpha_imu_gyro <-? buffer.get<Real>("alpha_imu_gyro");
+    beta_imu_gyro <-? buffer.get<Real>("beta_imu_gyro");
+    alpha_press_velo <-? buffer.get<Real>("alpha_press_velo");
+    beta_press_velo <-? buffer.get<Real>("beta_press_velo");
+    alpha_press_acc <-? buffer.get<Real>("alpha_press_acc");
+    beta_press_acc <-? buffer.get<Real>("beta_press_acc");
+  }
+  
+  override function read(t:Integer, buffer:Buffer) {
+    //left imus
+    x_ddot_0[t] <-? buffer.get<Real>("x_ddot_0");
+    y_ddot_0[t] <-? buffer.get<Real>("y_ddot_0");
+    z_ddot_0[t] <-? buffer.get<Real>("z_ddot_0");
+    omega_x_0[t] <-? buffer.get<Real>("omega_x_0");
+    omega_y_0[t] <-? buffer.get<Real>("omega_y_0");
+    omega_z_0[t] <-? buffer.get<Real>("omega_z_0");
+    
+    x_ddot_1[t] <-? buffer.get<Real>("x_ddot_1");
+    y_ddot_1[t] <-? buffer.get<Real>("y_ddot_1");
+    z_ddot_1[t] <-? buffer.get<Real>("z_ddot_1");
+    omega_x_1[t] <-? buffer.get<Real>("omega_x_1");
+    omega_y_1[t] <-? buffer.get<Real>("omega_y_1");
+    omega_z_1[t] <-? buffer.get<Real>("omega_z_1");
+    
+    //left pressure
+    x_dot_4[t] <-? buffer.get<Real>("x_dot_4");
+    y_dot_4[t] <-? buffer.get<Real>("y_dot_4");
+    z_dot_4[t] <-? buffer.get<Real>("z_dot_4");
+    x_ddot_4[t] <-? buffer.get<Real>("x_ddot_4");
+    y_ddot_4[t] <-? buffer.get<Real>("y_ddot_4");
+    z_ddot_4[t] <-? buffer.get<Real>("z_ddot_4");
+    
+    //hip position
+    x_True[t] <-? buffer.get<Real[_]>("x_True");
+  }
+  
+  override function write(buffer:Buffer) {
+    buffer.set("dt", dt);
+    buffer.set("a_1", a_1);
+    buffer.set("P_1", P_1);
+    
+    buffer.set("Q", Q);
+    buffer.set("T", T);
+    
+    buffer.set("nu", nu);
+    buffer.set("Psi", Psi);
+    
+    buffer.set("h", h);
+    
+    buffer.set("alpha_imu_acc", alpha_imu_acc);
+    buffer.set("beta_imu_acc", beta_imu_acc);
+    buffer.set("alpha_imu_gyro", alpha_imu_gyro);
+    buffer.set("beta_imu_gyro", beta_imu_gyro);
+    buffer.set("alpha_press_velo", alpha_press_velo);
+    buffer.set("beta_press_velo", beta_press_velo);
+    buffer.set("alpha_press_acc", alpha_press_acc);
+    buffer.set("beta_press_acc", beta_press_acc);
+    
+    buffer.set("sigma_imu_acc", sigma_imu_acc);
+    buffer.set("sigma_imu_gyro", sigma_imu_gyro);
+    buffer.set("sigma_press_velo", sigma_press_velo);
+    buffer.set("sigma_press_acc", sigma_press_acc);    
+  }
+  
+  override function write(t:Integer, buffer:Buffer) {
+    buffer.set("x", x[t]);
+  }
+
+}
